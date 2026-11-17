@@ -337,8 +337,12 @@ function applyShot(name){
     cover:  { mission:0, phase:'toDropoff', time:17*60+20, money:125000, onMotor:true,  x:420, y:650, angle:0,           wanted:0 },
     // Kejar-kejaran: wanted 3, polisi di belakang, malam neon
     chase:  { mission:4, phase:'toDropoff', time:19*60,     money:320000, onMotor:true,  x:1500, y:650, angle:0,          wanted:3 },
-    // Jalan kaki di pasar: Arka turun, pejalan kaki di sekitar
-    market: { mission:0, phase:'toPickup',  time:17*60+10, money:25000,  onMotor:false, x:380, y:380, angle:Math.PI/2,   wanted:0 },
+    // Jalan kaki di pasar: Arka turun, pejalan kaki di sekitar.
+    // Fase toDropoff supaya marker hijau Pasar Senja terlihat di tengah frame:
+    // marker jemput kuning di Pangkalan tadinya tertutup panel misi kiri bawah.
+    // Arka dipindah ke y=440 agar jarak ke tujuan 100 px (> 58) sehingga misi
+    // tidak selesai sendiri sebelum screenshot diambil.
+    market: { mission:0, phase:'toDropoff', time:17*60+10, money:25000,  onMotor:false, x:380, y:440, angle:Math.PI/2,   wanted:0 },
     // Misi Bu Sari di warteg: paket diantar, dialog Bu Sari tampil
     warteg: { mission:2, phase:'toDropoff', time:17*60+40, money:90000,  onMotor:true,  x:820, y:920, angle:Math.PI/2,   wanted:0 },
   };
