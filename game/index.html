@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Senja City: Ojek Terakhir</title>
+<!--
+  SENJA CITY: Ojek Terakhir — entri final untuk make.fun gta6-01 "Make GTA 6".
+  Single-file HTML + CSS + JavaScript vanilla, tanpa library luar, tanpa
+  request network sama sekali (tanpa font/CDN/analytics). Semua aset orisinal.
+  Cara main di Chrome desktop: buka game/index.html (atau node serve.ts),
+  klik MULAI, pakai keyboard.
+  Kontrol: WASD / Panah = jalan kaki, gas & belok saat naik kendaraan,
+           E = naik / turun motor & mobil, Spasi = klakson,
+           P = pause, M = mute.
+  Fitur: jalan kaki, motor ojek + mobil curian, minimap real-time,
+         traffic mobil & angkot, pejalan kaki NPC, wanted level 1-5 +
+         polisi mengejar dan menangkap, 8 misi ojek berantai dari Bu Sari
+         (target setoran Rp 500.000), audio WebAudio, save/load localStorage,
+         HUD Rupiah/rating/kecepatan, layar mulai & selesai, siklus senja-malam.
+  Mode scene deterministik untuk screenshot: ?shot=cover|chase|market|warteg
+  (lihat shots.json di root repo). Mode ini hanya mengatur posisi awal;
+  semua sistem game tetap jalan normal.
+-->
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#1a1210; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:#fff; }
+  #wrap { position:fixed; inset:0; }
+  canvas#game { display:block; width:100%; height:100%; background:#2b2119; }
+  /* HUD atas */
+  #hud { position:absolute; top:12px; left:12px; right:12px; display:flex; gap:10px; align-items:flex-start; pointer-events:none; flex-wrap:wrap; }
+  .pill { background:rgba(20,12,10,.82); border:1px solid rgba(255,180,90,.35); border-radius:12px; padding:8px 12px; font-size:14px; line-height:1.35; box-shadow:0 4px 18px rgba(0,0,0,.35); }
+  .pill b { color:#ffb84d; }
+  #wanted { font-size:20px; letter-spacing:2px; }
+  #wanted .on { color:#ff4d4d; text-shadow:0 0 8px #ff0000; }
+  #wanted .off { color:#5a4a44; }
+  /* Panel misi kiri bawah */
+  #mission { position:absolute; left:12px; bottom:12px; max-width:420px; background:rgba(20,12,10,.86); border:1px solid rgba(255,180,90,.4); border-radius:14px; padding:12px 14px; }
+  #mission h2 { font-size:15px; color:#ffb84d; margin-bottom:4px; }
+  #mission p { font-size:13.5px; line-height:1.5; color:#ffe8c8; }
+  #mission .meta { margin-top:8px; font-size:13px; color:#fff; display:flex; gap:12px; flex-wrap:wrap; }
+  #mission .meta b { color:#7dff9b; }
+  #timerBar { height:8px; background:#3a2a22; border-radius:99px; overflow:hidden; margin-top:8px; }
+  #timerFill { height:100%; width:100%; background:linear-gradient(90deg,#ffb84d,#ff7a3d); }
+  /* Minimap */
+  #minimapBox { position:absolute; right:12px; bottom:12px; background:rgba(20,12,10,.86); border:1px solid rgba(255,180,90,.4); border-radius:14px; padding:8px; text-align:center; }
+  #minimapBox small { display:block; font-size:11px; letter-spacing:1px; color:#ffb84d; margin-bottom:6px; }
+  canvas#minimap { display:block; width:180px; height:180px; border-radius:10px; background:#241a16; }
+  /* Toast */
+  #toast { position:absolute; top:76px; left:50%; transform:translateX(-50%); background:#ffb84d; color:#241207; font-weight:700; padding:10px 18px; border-radius:99px; font-size:14px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:92%; text-align:center; box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  #toast.show { opacity:1; }
+  /* Tombol bantuan */
+  #help { position:absolute; right:12px; top:12px; display:flex; gap:8px; }
+  #help button { pointer-events:auto; background:rgba(20,12,10,.82); color:#fff; border:1px solid rgba(255,180,90,.4); border-radius:10px; padding:8px 10px; cursor:pointer; font-size:13px; }
+  #help button:hover { background:#3a2418; }
+  /* Layar awal / pause / tamat */
+  .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at center, rgba(255,122,61,.28), rgba(10,5,4,.88) 70%); z-index:10; padding:20px; }
+  .card { max-width:640px; width:100%; background:rgba(24,14,10,.94); border:1px solid #ffb84d66; border-radius:20px; padding:28px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .card h1 { font-size:38px; line-height:1.05; color:#ffb84d; margin-bottom:6px; }
+  .card h1 span { color:#fff; }
+  .card p.sub { color:#ffd9a0; margin-bottom:16px; line-height:1.6; }
+  .card .controls { text-align:left; background:#2a1a12; border-radius:12px; padding:14px 16px; font-size:14px; line-height:1.9; margin:0 auto 18px; max-width:520px; }
+  .card .controls b { color:#ffb84d; }
+  .btn { display:inline-block; background:#ff7a3d; color:#fff; border:none; border-radius:99px; padding:13px 28px; font-size:16px; font-weight:800; cursor:pointer; margin:4px; }
+  .btn:hover { background:#ff8f57; }
+  .btn.ghost { background:transparent; border:1px solid #ffb84d; color:#ffb84d; }
+  .hidden { display:none !important; }
+  #busted { color:#ff6b6b; font-size:22px; font-weight:800; margin-bottom:8px; }
+  @media (max-width:640px){ .card h1{font-size:28px} #mission{max-width:70%} canvas#minimap{width:130px;height:130px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="pill">💰 <b id="money">Rp 0</b><br>⭐ Rating <b id="rating">5.0</b> &nbsp;•&nbsp; Misi <b id="doneCount">0/8</b></div>
+    <div class="pill">🕔 <b id="clock">17:00</b> Senja City<br><span id="speed">0 km/j</span> &nbsp;•&nbsp; <span id="mode">Jalan kaki</span></div>
+    <div class="pill" id="wanted">☆☆☆☆☆</div>
+  </div>
+
+  <div id="help">
+    <button id="btnSound">🔊 Suara: On</button>
+    <button id="btnPause">⏸ Pause (P)</button>
+    <button id="btnSave">💾 Save</button>
+  </div>
+
+  <div id="mission">
+    <h2 id="missionTitle">Siap narik, Arka?</h2>
+    <p id="missionText">Klik MULAI. Bu Sari akan kasih misi pertama dari pangkalan ojek.</p>
+    <div class="meta"><span>🎯 <b id="missionTarget">—</b></span><span>⏱ <b id="missionTime">—</b></span><span>💵 Hadiah <b id="missionReward">—</b></span></div>
+    <div id="timerBar"><div id="timerFill"></div></div>
+  </div>
+
+  <div id="minimapBox"><small>MINIMAP — SENJA CITY</small><canvas id="minimap" width="180" height="180"></canvas></div>
+  <div id="toast"></div>
+
+  <div id="startScreen" class="overlay">
+    <div class="card">
+      <h1>SENJA CITY<br><span>Ojek Terakhir</span></h1>
+      <p class="sub">Kamu <b>Arka</b>, driver ojek terakhir di Senja City. Siang antar penumpang, malam jadi getaway driver. Bu Sari, dispatcher cerewetmu, sudah menunggu di pangkalan. Jangan kecewakan dia — rating bintang 5 dipertaruhkan.</p>
+      <div class="controls">
+        <b>WASD / Panah</b> — jalan kaki, gas &amp; belok saat naik kendaraan<br>
+        <b>E</b> — naik / turun motor &amp; mobil (dekat kendaraan)<br>
+        <b>Spasi</b> — klakson &nbsp;•&nbsp; <b>P</b> — pause &nbsp;•&nbsp; <b>M</b> — mute<br>
+        Jemput penumpang di titik <b style="color:#ffe14d">kuning</b>, antar ke titik <b style="color:#7dff9b">hijau</b> sebelum timer habis.<br>
+        Mencuri mobil, menabrak pejalan kaki, atau ugal-ugalan menaikkan <b>Wanted ★</b>. Polisi akan mengejarmu!
+      </div>
+      <button class="btn" id="btnStart">🛵 MULAI NARIK</button>
+      <button class="btn ghost hidden" id="btnContinue">Lanjutkan Save</button>
+      <p class="sub" style="margin-top:12px;font-size:12px;opacity:.8">Entri final untuk make.fun gta6-01 "Make GTA 6". Save tersimpan di browser ini (localStorage).<br>Semua kota, karakter, kendaraan, nama, cerita, dan suara di game ini orisinal.</p>
+    </div>
+  </div>
+
+  <div id="pauseScreen" class="overlay hidden">
+    <div class="card"><h1>⏸ Pause</h1><p class="sub">Istirahat dulu, Arka. Kopi Bu Sari sudah diseduh.</p><button class="btn" id="btnResume">Lanjutkan</button></div>
+  </div>
+
+  <div id="endScreen" class="overlay hidden">
+    <div class="card"><h1>🏆 Legenda Senja City!</h1><p class="sub" id="endText"></p><button class="btn" id="btnFree">Lanjut Mode Bebas</button> <button class="btn ghost" id="btnAgain">Main Lagi dari Awal</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   SENJA CITY — logika game (vanilla JS, tanpa library)
+   Dunia: 2400 x 1800, jalan grid, kamera mengikuti pemain.
+   ============================================================ */
+const WORLD_W = 2400, WORLD_H = 1800;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const mini = document.getElementById('minimap');
+const mctx = mini.getContext('2d');
+
+function resize(){ canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize); resize();
+
+// Util
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
+const fmtRp = n => 'Rp ' + Math.floor(n).toLocaleString('id-ID');
+// Random deterministik sederhana agar kota sama tiap load
+let _seed = 42;
+function rnd(){ _seed = (_seed*1664525 + 1013904223) % 4294967296; return _seed/4294967296; }
+function pick(arr){ return arr[Math.floor(rnd()*arr.length)]; }
+
+// ---- Peta: jalan grid ----
+const ROADS_V = [300, 700, 1100, 1500, 1900]; // x jalan vertikal
+const ROADS_H = [300, 650, 1000, 1350];       // y jalan horizontal
+const ROAD_W = 96;
+function onRoad(x,y){
+  for(const rx of ROADS_V) if(Math.abs(x-rx) < ROAD_W/2+6) return true;
+  for(const ry of ROADS_H) if(Math.abs(y-ry) < ROAD_W/2+6) return true;
+  return false;
+}
+function nearestRoadPoint(x,y){
+  // cari titik di jalan terdekat (untuk spawn traffic / pejalan kaki)
+  let best=null, bd=1e9;
+  for(const rx of ROADS_V){ const d=Math.abs(x-rx); if(d<bd){bd=d; best={x:rx,y};} }
+  for(const ry of ROADS_H){ const d=Math.abs(y-ry); if(d<bd){bd=d; best={x,y:ry};} }
+  return best;
+}
+
+// ---- Bangunan (kotak di antara jalan, tidak di jalan) ----
+const buildings = [];
+const LANDMARKS = {
+  pangkalan: {x:340, y:700, name:'Pangkalan Ojek'},
+  pasar:     {x:380, y:340, name:'Pasar Senja'},
+  kampus:    {x:1950, y:340, name:'Kampus Senja'},
+  warteg:    {x:750, y:1050, name:'Warteg Bu Sari'},
+  kantor:    {x:1550, y:700, name:'Kantor Arus Media'},
+  pelabuhan: {x:2050, y:1400, name:'Pelabuhan Senja'},
+  taman:     {x:1150, y:1050, name:'Taman Senja'},
+  stasiun:   {x:750, y:1400, name:'Stasiun Senja'},
+};
+(function buildCity(){
+  const colors = ['#5a3a4a','#3d4a6b','#6b4a2f','#4a5d3a','#6b3d5a','#2f5d5a','#7a5a2f','#4a3a6b'];
+  // blok antar jalan
+  const xs = [60, 396, 796, 1196, 1596, 1996];
+  const xe = [204, 604, 1004, 1404, 1804, 2340];
+  const ys = [60, 396, 746, 1096, 1446];
+  const ye = [204, 554, 904, 1254, 1740];
+  for(let i=0;i<xs.length;i++){
+    for(let j=0;j<ys.length;j++){
+      // sisakan taman di tengah
+      if(i===2 && j===2) continue;
+      if(i===4 && j===3) continue;
+      const w = (xe[i]-xs[i]) * (0.55 + rnd()*0.3);
+      const h = (ye[j]-ys[j]) * (0.55 + rnd()*0.3);
+      const x = xs[i] + rnd()*((xe[i]-xs[i])-w);
+      const y = ys[j] + rnd()*((ye[j]-ys[j])-h);
+      buildings.push({x,y,w,h,color:pick(colors)});
+      // bangunan kedua kecil di blok besar kadang
+      if(rnd()>0.6){
+        const w2=60+rnd()*60, h2=50+rnd()*50;
+        buildings.push({x:xs[i]+10+rnd()*40, y:ye[j]-h2-10, w:w2, h:h2, color:pick(colors)});
+      }
+    }
+  }
+})();
+function collidesBuilding(x,y,r){
+  for(const b of buildings){
+    if(x+r>b.x && x-r<b.x+b.w && y+r>b.y && y-r<b.y+b.h) return b;
+  }
+  return null;
+}
+function resolveCollision(p, r){
+  const b = collidesBuilding(p.x,p.y,r);
+  if(!b) return;
+  // dorong keluar ke sisi terdekat
+  const dxLeft = (p.x+r)-b.x, dxRight=(b.x+b.w)-(p.x-r);
+  const dyTop=(p.y+r)-b.y, dyBottom=(b.y+b.h)-(p.y-r);
+  const m=Math.min(dxLeft,dxRight,dyTop,dyBottom);
+  if(m===dxLeft) p.x=b.x-r; else if(m===dxRight) p.x=b.x+b.w+r;
+  else if(m===dyTop) p.y=b.y-r; else p.y=b.y+b.h+r;
+}
+
+// ---- Audio sederhana (WebAudio, tanpa file) ----
+let audioCtx=null, muted=false;
+function ensureAudio(){ if(!audioCtx){ try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }
+function beep(freq, dur, type, vol){
+  if(muted || !audioCtx) return;
+  try{
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type=type||'sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+dur);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+  }catch(e){}
+}
+const sfx = {
+  pickup(){ beep(880,.12,'sine',.15); setTimeout(()=>beep(1320,.15,'sine',.15),90); },
+  success(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.16,'triangle',.15), i*90)); },
+  fail(){ beep(220,.3,'sawtooth',.12); setTimeout(()=>beep(160,.35,'sawtooth',.12),120); },
+  honk(){ beep(370,.18,'square',.08); },
+  siren(){ beep(720,.22,'sine',.06); setTimeout(()=>beep(540,.22,'sine',.06),220); },
+  busted(){ [400,300,200].forEach((f,i)=>setTimeout(()=>beep(f,.2,'sawtooth',.14), i*140)); },
+};
+
+// ---- State game ----
+const player = {
+  x: 340, y: 760, angle: -Math.PI/2, speed: 0,
+  onFoot: true, vehicle: null, // 'motor' | object mobil
+  money: 0, rating: 5.0, wanted: 0, missionsDone: 0,
+  lastCrimeAt: -9999, catchTimer: 0, hiddenTimer: 0,
+};
+let gameTimeMin = 17*60; // 17:00
+let paused=false, started=false, freeMode=false;
+let cam = {x:0, y:0};
+const keys = {};
+
+// Motor pemain (ojek hijau) — selalu ada di pangkalan awal
+const myMotor = {x:380, y:780, angle:0, type:'motor', color:'#22c55e', owner:'player', speed:0};
+// Mobil yang bisa dicuri (parkir di pinggir jalan)
+const stealableCars = [
+  {x:760, y:620, angle:0, type:'car', color:'#e74c3c', stolen:false},
+  {x:1160, y:970, angle:Math.PI/2, type:'car', color:'#3498db', stolen:false},
+  {x:1560, y:620, angle:0, type:'car', color:'#f1c40f', stolen:false},
+  {x:1960, y:970, angle:0, type:'car', color:'#9b59b6', stolen:false},
+  {x:360, y:1320, angle:0, type:'car', color:'#ecf0f1', stolen:false},
+];
+// Traffic (mobil + angkot) yang jalan di jalan
+const traffic = [];
+(function initTraffic(){
+  const cols=['#ff8c42','#e74c3c','#3498db','#f1c40f','#ecf0f1','#2ecc71'];
+  for(let i=0;i<14;i++){
+    const vertical = rnd()>0.5;
+    const road = vertical ? pick(ROADS_V) : pick(ROADS_H);
+    const lane = (rnd()>0.5?1:-1)*22;
+    traffic.push({
+      x: vertical ? road+lane : 80+rnd()*(WORLD_W-160),
+      y: vertical ? 80+rnd()*(WORLD_H-160) : road+lane,
+      vertical, dir: rnd()>0.5?1:-1,
+      speed: 55+rnd()*45, color: pick(cols),
+      kind: rnd()>0.82 ? 'angkot' : 'car',
+    });
+  }
+})();
+// Pejalan kaki
+const peds = [];
+(function initPeds(){
+  const cols=['#ff6b9d','#7dff9b','#ffd166','#4dd0e1','#ff9f43','#c084fc'];
+  for(let i=0;i<24;i++){
+    const p = nearestRoadPoint(100+rnd()*(WORLD_W-200), 100+rnd()*(WORLD_H-200));
+    peds.push({x:p.x+(rnd()*40-20), y:p.y+(rnd()*40-20), tx:p.x, ty:p.y, speed:28+rnd()*22, color:pick(cols), wait:0});
+  }
+})();
+// Polisi
+const police = [];
+
+// ---- Misi Bu Sari (6 misi cerita) ----
+const MISSIONS = [
+  { title:'Misi 1 — Nenek Jamu', passenger:'Nenek Sari', from:LANDMARKS.pangkalan, to:LANDMARKS.pasar,
+    reward:25000, time:90,
+    dialog:'Bu Sari: "Arka, jemput Nenek Sari di pangkalan, antar ke Pasar Senja. Hati-hati, jamunya jangan tumpah!"' },
+  { title:'Misi 2 — Mahasiswa Buru-buru', passenger:'Dimas, mahasiswa', from:LANDMARKS.pasar, to:LANDMARKS.kampus,
+    reward:35000, time:75,
+    dialog:'Bu Sari: "Dimas ketinggalan ujian di Kampus Senja! Ngebut dikit boleh, tapi jangan nabrak. Ratingmu dipertaruhkan!"' },
+  { title:'Misi 3 — Paket Warteg', passenger:'Paket nasi + es teh', from:LANDMARKS.kampus, to:LANDMARKS.warteg,
+    reward:30000, time:80,
+    dialog:'Bu Sari: "Antar paket Warteg ke Bu Sari — eh, ke wartegnya. Es tehnya jangan sampai tumpah, Arka!"' },
+  { title:'Misi 4 — Bos Arus Media', passenger:'Pak Bram, bos kantor', from:LANDMARKS.warteg, to:LANDMARKS.kantor,
+    reward:50000, time:85,
+    dialog:'Bu Sari: "Pak Bram harus sampai Kantor Arus Media sebelum rapat. Bawa yang halus, dia gampang mabuk darat!"' },
+  { title:'Misi 5 — Getaway Malam', passenger:'Paket misterius', from:LANDMARKS.kantor, to:LANDMARKS.pelabuhan,
+    reward:80000, time:100, getaway:true,
+    dialog:'Bu Sari (berbisik): "Arka... paket ini jangan ditanya isinya. Antar ke Pelabuhan Senja. Polisi sudah mengendus. Jangan ketangkap!"' },
+  { title:'Misi 6 — Bu Sari ke Taman', passenger:'Bu Sari', from:LANDMARKS.pelabuhan, to:LANDMARKS.taman,
+    reward:100000, time:110,
+    dialog:'Bu Sari: "Antar aku ke Taman Senja, Arka. Habis ini masih ada order — jangan santai dulu!"' },
+  { title:'Misi 7 — Penumpang VIP', passenger:'Ibu Ratna, penyanyi Senja', from:LANDMARKS.taman, to:LANDMARKS.stasiun,
+    reward:80000, time:100,
+    dialog:'Bu Sari: "Ibu Ratna harus sampai Stasiun Senja sebelum kereta terakhir! Dia penyanyi terkenal — jangan bikin dia telat, ratingmu dipertaruhkan!"' },
+  { title:'Misi 8 — Setoran Terakhir', passenger:'Kotak setoran Bu Sari', from:LANDMARKS.stasiun, to:LANDMARKS.pangkalan,
+    reward:100000, time:120,
+    dialog:'Bu Sari: "Terakhir, Arka. Antar kotak setoran ini ke pangkalan. Rp 500.000 harus utuh. Kalau beres, kamu resmi legenda Senja City!"' },
+];
+// Total hadiah 8 misi: 25rb + 35rb + 30rb + 50rb + 80rb + 100rb + 80rb + 100rb = Rp 500.000 (target setoran).
+let missionIndex = 0;
+let missionPhase = 'toPickup'; // toPickup | toDropoff | done
+let missionTimer = 0;
+let missionActive = false;
+let currentPassenger = null;
+let elapsedSec = 0, sirenTimer = 0, autosaveTimer = 0;
+
+// ---- Mode scene deterministik untuk screenshot (?shot=cover|chase|market|warteg) ----
+// Dipakai shots.json di root repo: memuat scene yang sama setiap kali dibuka,
+// dengan timer misi & jam game dibekukan supaya staging stabil saat diambil
+// screenshot-nya. Mode ini HANYA mengatur posisi awal; semua sistem game
+// (traffic, polisi, minimap, HUD) tetap jalan normal. Bukan cheat.
+let shotMode = false;
+const SHOT = new URLSearchParams(location.search).get('shot');
+function applyShot(name){
+  const scenes = {
+    // Cover Hari ke-2: senja, motor + penumpang, angkot lewat, minimap, misi
+    cover:  { mission:0, phase:'toDropoff', time:17*60+20, money:125000, onMotor:true,  x:420, y:650, angle:0,           wanted:0 },
+    // Kejar-kejaran: wanted 3, polisi di belakang, malam neon
+    chase:  { mission:4, phase:'toDropoff', time:19*60,     money:320000, onMotor:true,  x:1500, y:650, angle:0,          wanted:3 },
+    // Jalan kaki di pasar: Arka turun, pejalan kaki di sekitar
+    market: { mission:0, phase:'toPickup',  time:17*60+10, money:25000,  onMotor:false, x:380, y:380, angle:Math.PI/2,   wanted:0 },
+    // Misi Bu Sari di warteg: paket diantar, dialog Bu Sari tampil
+    warteg: { mission:2, phase:'toDropoff', time:17*60+40, money:90000,  onMotor:true,  x:820, y:920, angle:Math.PI/2,   wanted:0 },
+  };
+  const s = scenes[name]; if(!s) return false;
+  shotMode = true;
+  started = true; paused = false;
+  $('startScreen').classList.add('hidden');
+  player.money = s.money; player.rating = 5.0; player.missionsDone = s.mission;
+  gameTimeMin = s.time; player.wanted = s.wanted; player.lastCrimeAt = -9999;
+  startMission(s.mission);
+  missionPhase = s.phase;
+  if(s.phase==='toDropoff'){ currentPassenger = MISSIONS[s.mission].passenger; }
+  player.x = s.x; player.y = s.y; player.angle = s.angle; player.speed = 0;
+  if(s.onMotor){
+    player.onFoot=false; player.vehicle=myMotor;
+    myMotor.x=s.x; myMotor.y=s.y; myMotor.angle=s.angle;
+  } else { player.onFoot=true; player.vehicle=null; }
+  missionTimer = MISSIONS[s.mission].time;
+  if(name==='cover'){
+    // staging traffic deterministik di sekitar pemain (angkot + 2 mobil)
+    traffic[0].x=620; traffic[0].y=672; traffic[0].vertical=false; traffic[0].dir=1; traffic[0].kind='angkot';
+    traffic[1].x=820; traffic[1].y=628; traffic[1].vertical=false; traffic[1].dir=1;
+    traffic[2].x=240; traffic[2].y=672; traffic[2].vertical=false; traffic[2].dir=-1;
+  }
+  if(name==='chase'){
+    for(let i=0;i<3;i++) police.push({x:s.x-170-i*70, y:s.y+44*(i-1), speed:260, catch:0});
+  }
+  if(name==='market'){
+    // kumpulkan beberapa pejalan kaki di sekitar pasar untuk frame yang hidup
+    for(let i=0;i<5 && i<peds.length;i++){ peds[i].x=330+i*30; peds[i].y=380+((i%2)?20:-16); peds[i].tx=peds[i].x; peds[i].ty=peds[i].y; peds[i].wait=9999; }
+  }
+  updateHUD();
+  return true;
+}
+
+// ---- DOM ----
+const $ = id => document.getElementById(id);
+const moneyEl=$('money'), ratingEl=$('rating'), doneEl=$('doneCount'), clockEl=$('clock'),
+  speedEl=$('speed'), modeEl=$('mode'), wantedEl=$('wanted'),
+  missionTitleEl=$('missionTitle'), missionTextEl=$('missionText'),
+  missionTargetEl=$('missionTarget'), missionTimeEl=$('missionTime'),
+  missionRewardEl=$('missionReward'), timerFillEl=$('timerFill'), toastEl=$('toast');
+
+let toastTimeout=null;
+function toast(msg, ms){
+  toastEl.textContent=msg; toastEl.classList.add('show');
+  clearTimeout(toastTimeout);
+  toastTimeout=setTimeout(()=>toastEl.classList.remove('show'), ms||3200);
+}
+function updateHUD(){
+  moneyEl.textContent=fmtRp(player.money);
+  ratingEl.textContent=player.rating.toFixed(1);
+  doneEl.textContent=player.missionsDone+'/8';
+  const hh=Math.floor(gameTimeMin/60)%24, mm=Math.floor(gameTimeMin%60);
+  clockEl.textContent=String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  const kmh=Math.round(Math.abs(player.speed)*0.45);
+  speedEl.textContent=kmh+' km/j';
+  modeEl.textContent=player.onFoot?'Jalan kaki':(player.vehicle && player.vehicle.type==='motor'?'Naik motor ojek':'Naik mobil');
+  let stars='';
+  for(let i=0;i<5;i++) stars+= i<player.wanted ? '<span class="on">★</span>' : '<span class="off">☆</span>';
+  wantedEl.innerHTML=stars;
+  if(missionActive){
+    const m=MISSIONS[missionIndex] || MISSIONS[MISSIONS.length-1];
+    missionTitleEl.textContent=m.title + (freeMode?' (Mode Bebas)':'');
+    const target = missionPhase==='toPickup' ? m.from : m.to;
+    missionTargetEl.textContent=(missionPhase==='toPickup'?'Jemput di ':'Antar ke ')+target.name;
+    missionTimeEl.textContent=Math.max(0,Math.ceil(missionTimer))+' dtk';
+    missionRewardEl.textContent=fmtRp(m.reward);
+    timerFillEl.style.width=clamp(missionTimer/m.time*100,0,100)+'%';
+  }
+}
+
+// ---- Misi ----
+function startMission(i){
+  if(i>=MISSIONS.length){ finishGame(); return; }
+  missionIndex=i; missionPhase='toPickup'; missionActive=true;
+  const m=MISSIONS[i]; missionTimer=m.time; currentPassenger=null;
+  missionTextEl.textContent=m.dialog;
+  updateHUD();
+  toast('📻 '+m.title+' — cek panel misi kiri bawah!');
+}
+function startRandomMission(){
+  // mode bebas: misi acak antar landmark
+  const names=Object.keys(LANDMARKS);
+  const a=LANDMARKS[names[Math.floor(Math.random()*names.length)]];
+  let b=LANDMARKS[names[Math.floor(Math.random()*names.length)]];
+  if(b===a) b=LANDMARKS.pasar;
+  const fake={title:'Misi Bebas — Antar Penumpang', passenger:'Penumpang', from:a, to:b, reward:15000+Math.floor(Math.random()*20000), time:80, dialog:'Bu Sari: "Ada order baru! Jemput di '+a.name+', antar ke '+b.name+'. Gas, Arka!"'};
+  MISSIONS.push(fake);
+  startMission(MISSIONS.length-1);
+}
+function completeMission(){
+  const m=MISSIONS[missionIndex];
+  const fastBonus = missionTimer>20 ? 10000 : 0;
+  const total=m.reward+fastBonus;
+  player.money+=total;
+  player.rating=clamp(player.rating+0.1,1,5);
+  player.missionsDone++;
+  missionActive=false; currentPassenger=null;
+  sfx.success();
+  toast('✅ Misi selesai! +'+fmtRp(total)+(fastBonus?' (termasuk bonus cepat Rp 10.000)':''));
+  missionTextEl.textContent='Mantap, Arka! Uang masuk '+fmtRp(total)+'. Bu Sari lagi cari order berikutnya...';
+  saveGame();
+  setTimeout(()=>{
+    if(freeMode){ startRandomMission(); }
+    else if(missionIndex+1>=MISSIONS.length){ finishGame(); }
+    else startMission(missionIndex+1);
+  }, 1800);
+  updateHUD();
+}
+function failMission(){
+  const m=MISSIONS[missionIndex];
+  player.rating=clamp(player.rating-0.3,1,5);
+  missionActive=false;
+  sfx.fail();
+  toast('⏰ Waktu habis! Rating -0.3. Coba lagi misi ini.');
+  missionTextEl.textContent='Yah, telat. Bu Sari ngomel, tapi dia kasih kesempatan kedua untuk "'+m.title+'".';
+  setTimeout(()=>startMission(missionIndex), 1500);
+  updateHUD();
+}
+function finishGame(){
+  missionActive=false; freeMode=false;
+  started=true; paused=false;
+  $('endText').textContent='8 misi selesai! Setoran Rp 500.000 tercapai. Uang: '+fmtRp(player.money)+', rating: '+player.rating.toFixed(1)+', wanted akhir: '+player.wanted+'★. Kamu resmi legenda Senja City, Arka — driver ojek di siang hari, getaway driver terbaik kota di malam hari.';
+  $('endScreen').classList.remove('hidden');
+  sfx.success();
+}
+
+// ---- Wanted & polisi ----
+function addWanted(n, reason){
+  if(elapsedSec - player.lastCrimeAt < 2 && n===1) { /* cegah spam */ }
+  player.wanted=clamp(player.wanted+n,0,5);
+  player.lastCrimeAt=elapsedSec;
+  if(reason) toast(reason+' Wanted sekarang '+player.wanted+'★!');
+  updateHUD();
+}
+function spawnPolice(){
+  const need=player.wanted, have=police.length;
+  if(have<need){
+    const p=nearestRoadPoint(player.x+(Math.random()*600-300), player.y+(Math.random()*600-300));
+    police.push({x:clamp(p.x,40,WORLD_W-40), y:clamp(p.y,40,WORLD_H-40), speed:250+player.wanted*12, catch:0});
+  } else if(have>need){ police.splice(need); }
+}
+function busted(){
+  const lost=Math.floor(player.money*0.2);
+  player.money-=lost;
+  player.rating=clamp(player.rating-0.2,1,5);
+  player.wanted=0; police.length=0; player.catchTimer=0;
+  player.x=LANDMARKS.pangkalan.x; player.y=LANDMARKS.pangkalan.y+60;
+  player.speed=0; player.onFoot=true; player.vehicle=null;
+  sfx.busted();
+  toast('🚔 KETANGKAP! Denda '+fmtRp(lost)+'. Kamu dilepas di pangkalan. Rating -0.2.');
+  missionTextEl.textContent='Bu Sari: "Arka! Jangan bikin masalah lagi. Fokus narik, jangan kejar-kejaran sama polisi!"';
+  saveGame(); updateHUD();
+}
+
+// ---- Kendaraan ----
+function nearestVehicle(){
+  let best=null, bd=75;
+  const check=(v)=>{
+    const d=Math.hypot(player.x-v.x, player.y-v.y);
+    if(d<bd){ bd=d; best=v; }
+  };
+  check(myMotor);
+  for(const c of stealableCars) check(c);
+  return best;
+}
+function enterVehicle(){
+  if(!player.onFoot) return;
+  const v=nearestVehicle();
+  if(!v){ toast('Tidak ada kendaraan di dekatmu. Motor hijaumu ada di pangkalan.'); return; }
+  if(v.type==='car' && !v.stolen){
+    v.stolen=true;
+    addWanted(1,'🚨 Mencuri mobil!');
+  }
+  player.vehicle=v; player.onFoot=false; player.angle=v.angle||0;
+  toast(v.type==='motor'?'🛵 Naik motor ojek! Gas!':'🚗 Naik mobil! Jangan ugal-ugalan.');
+  beep(500,.1,'triangle',.1);
+}
+function exitVehicle(){
+  if(player.onFoot || !player.vehicle) return;
+  const v=player.vehicle;
+  v.x=player.x; v.y=player.y; v.angle=player.angle;
+  player.vehicle=null; player.onFoot=true; player.speed=0;
+  player.x+=Math.cos(player.angle+Math.PI/2)*36;
+  player.y+=Math.sin(player.angle+Math.PI/2)*36;
+  toast('Turun dari kendaraan. Jalan kaki lagi.');
+}
+
+// ---- Input ----
+window.addEventListener('keydown', e=>{
+  const k=e.key.toLowerCase();
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k)) e.preventDefault();
+  keys[k]=true; keys[e.key]=true;
+  ensureAudio();
+  if(k==='e' && started && !paused){
+    if(player.onFoot) enterVehicle(); else exitVehicle();
+  }
+  if(k===' ' && started && !paused){ sfx.honk(); }
+  if(k==='p'){ togglePause(); }
+  if(k==='m'){ toggleMute(); }
+});
+window.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; keys[e.key]=false; });
+function togglePause(){
+  if(!started) return;
+  paused=!paused;
+  $('pauseScreen').classList.toggle('hidden', !paused);
+}
+function toggleMute(){
+  muted=!muted;
+  $('btnSound').textContent=muted?'🔇 Suara: Off':'🔊 Suara: On';
+}
+
+// ---- Save / Load ----
+const SAVE_KEY='senja-city-save-v1';
+function saveGame(){
+  try{
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      money:player.money, rating:player.rating, missionsDone:player.missionsDone,
+      missionIndex, x:player.x, y:player.y, time:gameTimeMin, wanted:player.wanted
+    }));
+  }catch(e){}
+}
+function loadGame(){
+  try{
+    const s=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');
+    if(!s) return false;
+    player.money=s.money||0; player.rating=s.rating||5; player.missionsDone=s.missionsDone||0;
+    missionIndex=Math.min(s.missionIndex||0, MISSIONS.length-1);
+    player.x=s.x||340; player.y=s.y||760; gameTimeMin=s.time||1020; player.wanted=0;
+    return true;
+  }catch(e){ return false; }
+}
+function hasSave(){ try{ return !!localStorage.getItem(SAVE_KEY); }catch(e){ return false; } }
+
+// ---- Update ----
+function update(dt){
+  elapsedSec+=dt;
+  if(!shotMode) gameTimeMin+=dt*0.6; // ~1 menit game tiap ~1.6 detik nyata (dibekukan di mode shot)
+  if(gameTimeMin>=24*60) gameTimeMin=17*60;
+  autosaveTimer+=dt; if(autosaveTimer>15){ autosaveTimer=0; saveGame(); }
+
+  // Gerak pemain
+  const up=keys['w']||keys['arrowup'], down=keys['s']||keys['arrowdown'],
+        left=keys['a']||keys['arrowleft'], right=keys['d']||keys['arrowright'];
+  if(player.onFoot){
+    let dx=(right?1:0)-(left?1:0), dy=(down?1:0)-(up?1:0);
+    if(dx||dy){
+      const len=Math.hypot(dx,dy); dx/=len; dy/=len;
+      player.angle=Math.atan2(dy,dx);
+      player.x+=dx*175*dt; player.y+=dy*175*dt;
+      player.speed=175;
+    } else player.speed=0;
+    resolveCollision(player, 16);
+  } else {
+    const v=player.vehicle;
+    const maxSp = v.type==='motor'?390:330;
+    if(up) player.speed=Math.min(maxSp, player.speed+360*dt);
+    else if(down) player.speed=Math.max(-90, player.speed-420*dt);
+    else player.speed*=Math.pow(0.4,dt); // gesekan
+    if(Math.abs(player.speed)>8){
+      const steer=((left?1:0)-(right?1:0));
+      player.angle+=steer*1.9*dt*(player.speed/maxSp)*(player.speed>=0?1:-1)*-1;
+      // catatan: belok kiri = putar berlawanan jarum jam saat maju
+      if(left) player.angle-=0; // sudah dihitung di atas lewat steer
+    }
+    player.x+=Math.cos(player.angle)*player.speed*dt;
+    player.y+=Math.sin(player.angle)*player.speed*dt;
+    const hit=collidesBuilding(player.x,player.y,20);
+    if(hit){ player.speed*=-0.25; resolveCollision(player,20); if(Math.abs(player.speed)>120){ addWanted(0); } }
+    if(v){ v.x=player.x; v.y=player.y; v.angle=player.angle; }
+    // tabrak pejalan kaki = wanted
+    for(const p of peds){
+      if(Math.hypot(p.x-player.x,p.y-player.y)<30 && Math.abs(player.speed)>60){
+        if(elapsedSec-player.lastCrimeAt>3){
+          addWanted(1,'😱 Kamu menabrak pejalan kaki!');
+          p.x+= (p.x-player.x)*2; p.y+=(p.y-player.y)*2;
+        }
+      }
+    }
+    // tabrak traffic keras = wanted ringan
+    for(const t of traffic){
+      if(Math.hypot(t.x-player.x,t.y-player.y)<36 && Math.abs(player.speed)>140){
+        if(elapsedSec-player.lastCrimeAt>3){ addWanted(1,'💥 Tabrakan dengan mobil lain!'); player.speed*=0.4; }
+      }
+    }
+  }
+  player.x=clamp(player.x,20,WORLD_W-20); player.y=clamp(player.y,20,WORLD_H-20);
+
+  // Traffic jalan lurus di jalurnya, muter di ujung dunia
+  for(const t of traffic){
+    if(t.vertical) t.y+=t.dir*t.speed*dt;
+    else t.x+=t.dir*t.speed*dt;
+    if(t.x<-60) t.x=WORLD_W+50; if(t.x>WORLD_W+60) t.x=-50;
+    if(t.y<-60) t.y=WORLD_H+50; if(t.y>WORLD_H+60) t.y=-50;
+  }
+  // Pejalan kaki jalan ke target acak di dekat jalan
+  for(const p of peds){
+    if(p.wait>0){ p.wait-=dt; continue; }
+    const dx=p.tx-p.x, dy=p.ty-p.y, d=Math.hypot(dx,dy);
+    if(d<12){
+      const np=nearestRoadPoint(80+Math.random()*(WORLD_W-160), 80+Math.random()*(WORLD_H-160));
+      p.tx=np.x+(Math.random()*60-30); p.ty=np.y+(Math.random()*60-30); p.wait=Math.random()*1.5;
+    } else { p.x+=dx/d*p.speed*dt; p.y+=dy/d*p.speed*dt; }
+  }
+
+  // Polisi
+  spawnPolice();
+  let nearestPolice=1e9;
+  for(const pol of police){
+    const dx=player.x-pol.x, dy=player.y-pol.y, d=Math.hypot(dx,dy);
+    nearestPolice=Math.min(nearestPolice,d);
+    const ang=Math.atan2(dy,dx);
+    pol.x+=Math.cos(ang)*pol.speed*dt; pol.y+=Math.sin(ang)*pol.speed*dt;
+    if(d<38){ pol.catch+=dt; } else pol.catch=Math.max(0,pol.catch-dt);
+    if(pol.catch>1.2 && !shotMode){ busted(); break; } // di mode shot polisi mengejar tapi tidak menangkap
+  }
+  if(player.wanted>0){
+    sirenTimer-=dt; if(sirenTimer<=0){ sirenTimer=1.1; sfx.siren(); }
+    // wanted turun kalau lama tidak bikin ulah dan polisi jauh
+    if(elapsedSec-player.lastCrimeAt>18 && nearestPolice>420){
+      player.wanted--; player.lastCrimeAt=elapsedSec;
+      toast('Wanted turun jadi '+player.wanted+'★. Polisi kehilangan jejakmu.');
+      updateHUD();
+    }
+  }
+
+  // Misi
+  if(missionActive){
+    if(!shotMode) missionTimer-=dt; // timer dibekukan di mode shot supaya staging stabil
+    if(missionTimer<=0){ failMission(); }
+    else {
+      const m=MISSIONS[missionIndex];
+      const target=missionPhase==='toPickup'?m.from:m.to;
+      if(Math.hypot(player.x-target.x, player.y-target.y)<58){
+        if(missionPhase==='toPickup'){
+          missionPhase='toDropoff'; currentPassenger=m.passenger;
+          sfx.pickup();
+          toast('👤 '+m.passenger+' naik! Antar ke '+m.to.name+'.');
+          missionTextEl.textContent='Penumpang: '+m.passenger+'. Tujuan: '+m.to.name+'. '+(m.getaway?'AWAS POLISI!':'Hati-hati di jalan, Arka.');
+          if(m.getaway) addWanted(2,'🚨 Paket misterius — polisi mengejarmu!');
+        } else {
+          completeMission();
+        }
+      }
+    }
+  }
+
+  // Kamera ikuti pemain
+  cam.x=clamp(player.x-canvas.width/2, 0, Math.max(0,WORLD_W-canvas.width));
+  cam.y=clamp(player.y-canvas.height/2, 0, Math.max(0,WORLD_H-canvas.height));
+  updateHUD();
+}
+
+// ---- Gambar ----
+function drawVehicleShape(x,y,angle,w,len,color,isPolice,now){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(angle);
+  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(-len/2+3,-w/2+4,len,w);
+  ctx.fillStyle=color; ctx.fillRect(-len/2,-w/2,len,w);
+  // kaca
+  ctx.fillStyle='rgba(180,220,255,.9)'; ctx.fillRect(len*0.05,-w/2+3,len*0.28,w-6);
+  // roda
+  ctx.fillStyle='#111';
+  ctx.fillRect(-len/2+2,-w/2-3,10,4); ctx.fillRect(-len/2+2,w/2-1,10,4);
+  ctx.fillRect(len/2-12,-w/2-3,10,4); ctx.fillRect(len/2-12,w/2-1,10,4);
+  if(isPolice){
+    const on=Math.floor(now*4)%2===0;
+    ctx.fillStyle=on?'#ff2d2d':'#2d7dff'; ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+function draw(){
+  const now=performance.now()/1000;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save(); ctx.translate(-cam.x,-cam.y);
+  // tanah
+  ctx.fillStyle='#33261d'; ctx.fillRect(0,0,WORLD_W,WORLD_H);
+  // taman
+  ctx.fillStyle='#2f5d3a';
+  ctx.fillRect(1196,1096,208,158); ctx.fillRect(1596,1446,208,294);
+  ctx.fillStyle='#3f7d4a'; ctx.beginPath(); ctx.arc(1300,1175,42,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(1700,1600,52,0,Math.PI*2); ctx.fill();
+  // jalan
+  ctx.fillStyle='#3d3d4a';
+  for(const rx of ROADS_V) ctx.fillRect(rx-ROAD_W/2,0,ROAD_W,WORLD_H);
+  for(const ry of ROADS_H) ctx.fillRect(0,ry-ROAD_W/2,WORLD_W,ROAD_W);
+  // garis tengah jalan
+  ctx.strokeStyle='#ffd166'; ctx.lineWidth=3; ctx.setLineDash([18,16]);
+  for(const rx of ROADS_V){ ctx.beginPath(); ctx.moveTo(rx,0); ctx.lineTo(rx,WORLD_H); ctx.stroke(); }
+  for(const ry of ROADS_H){ ctx.beginPath(); ctx.moveTo(0,ry); ctx.lineTo(WORLD_W,ry); ctx.stroke(); }
+  ctx.setLineDash([]);
+  // bangunan
+  for(const b of buildings){
+    ctx.fillStyle=b.color; ctx.fillRect(b.x,b.y,b.w,b.h);
+    ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(b.x,b.y,b.w,8);
+    ctx.fillStyle='rgba(255,220,130,.85)';
+    for(let wx=b.x+10; wx<b.x+b.w-12; wx+=22)
+      for(let wy=b.y+16; wy<b.y+b.h-12; wy+=24)
+        ctx.fillRect(wx,wy,10,12);
+  }
+  // label landmark
+  ctx.font='bold 15px system-ui, sans-serif'; ctx.textAlign='center';
+  for(const key in LANDMARKS){
+    const L=LANDMARKS[key];
+    ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(L.x-62,L.y-38,124,22);
+    ctx.fillStyle='#ffe8c8'; ctx.fillText(L.name, L.x, L.y-22);
+    ctx.fillStyle='#ffb84d'; ctx.beginPath(); ctx.arc(L.x,L.y,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#241207'; ctx.font='bold 10px system-ui'; ctx.fillText('★',L.x,L.y+3); ctx.font='bold 15px system-ui, sans-serif';
+  }
+  // marker misi (denyut)
+  if(missionActive){
+    const m=MISSIONS[missionIndex];
+    const target=missionPhase==='toPickup'?m.from:m.to;
+    const pulse=1+Math.sin(now*5)*0.18;
+    ctx.strokeStyle=missionPhase==='toPickup'?'#ffe14d':'#7dff9b';
+    ctx.lineWidth=4;
+    ctx.beginPath(); ctx.arc(target.x,target.y,26*pulse,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle=missionPhase==='toPickup'?'#ffe14d':'#7dff9b';
+    ctx.beginPath(); ctx.arc(target.x,target.y,10,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#241207'; ctx.font='bold 12px system-ui'; ctx.fillText(missionPhase==='toPickup'?'!':'✓',target.x,target.y+4);
+    ctx.font='bold 15px system-ui, sans-serif';
+  }
+  // pejalan kaki
+  for(const p of peds){
+    ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(p.x,p.y-3,3,0,Math.PI*2); ctx.fill();
+  }
+  // traffic
+  for(const t of traffic){
+    const ang=t.vertical?(t.dir>0?Math.PI/2:-Math.PI/2):(t.dir>0?0:Math.PI);
+    if(t.kind==='angkot') drawVehicleShape(t.x,t.y,ang,22,44,'#ff8c42',false,now);
+    else drawVehicleShape(t.x,t.y,ang,20,40,t.color,false,now);
+  }
+  // mobil curian yang parkir
+  for(const c of stealableCars){
+    if(c===player.vehicle) continue;
+    drawVehicleShape(c.x,c.y,c.angle||0,20,42,c.color,false,now);
+    if(!c.stolen){ ctx.fillStyle='#ffe14d'; ctx.font='bold 12px system-ui'; ctx.fillText('E',c.x,c.y-30); }
+  }
+  // motor pemain kalau tidak dipakai
+  if(player.vehicle!==myMotor){
+    drawVehicleShape(myMotor.x,myMotor.y,myMotor.angle||0,12,30,myMotor.color,false,now);
+    ctx.fillStyle='#7dff9b'; ctx.font='bold 12px system-ui'; ctx.fillText('E',myMotor.x,myMotor.y-24);
+  }
+  // polisi
+  for(const pol of police) drawVehicleShape(pol.x,pol.y,Math.atan2(player.y-pol.y,player.x-pol.x),22,44,'#1f2a44',true,now);
+  // pemain
+  if(player.onFoot){
+    ctx.fillStyle='rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(player.x,player.y+10,12,5,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#ff7a3d'; ctx.beginPath(); ctx.arc(player.x,player.y,13,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(player.x,player.y-4,6,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(player.x,player.y); ctx.lineTo(player.x+Math.cos(player.angle)*18, player.y+Math.sin(player.angle)*18); ctx.stroke();
+    if(currentPassenger){
+      ctx.fillStyle='#ffd166'; ctx.beginPath(); ctx.arc(player.x-14,player.y+8,8,0,Math.PI*2); ctx.fill();
+    }
+  } else {
+    const v=player.vehicle;
+    if(v.type==='motor'){
+      drawVehicleShape(player.x,player.y,player.angle,13,34,'#22c55e',false,now);
+      ctx.fillStyle='#ff7a3d'; ctx.beginPath(); ctx.arc(player.x,player.y,7,0,Math.PI*2); ctx.fill();
+    } else {
+      drawVehicleShape(player.x,player.y,player.angle,21,44,v.color,false,now);
+    }
+    if(currentPassenger){
+      ctx.fillStyle='#ffd166'; ctx.font='bold 11px system-ui'; ctx.fillText('👤',player.x,player.y-28);
+    }
+  }
+  ctx.restore();
+
+  // overlay senja -> malam
+  const hour=gameTimeMin/60;
+  let night=0;
+  if(hour>=18.5) night=Math.min(0.42,(hour-18.5)*0.25);
+  if(night>0){ ctx.fillStyle='rgba(8,10,38,'+night+')'; ctx.fillRect(0,0,canvas.width,canvas.height); }
+
+  drawMinimap(now);
+}
+function drawMinimap(now){
+  const sx=mini.width/WORLD_W, sy=mini.height/WORLD_H;
+  mctx.clearRect(0,0,mini.width,mini.height);
+  mctx.fillStyle='#241a16'; mctx.fillRect(0,0,mini.width,mini.height);
+  mctx.strokeStyle='#5a5a6e'; mctx.lineWidth=2;
+  for(const rx of ROADS_V){ mctx.beginPath(); mctx.moveTo(rx*sx,0); mctx.lineTo(rx*sx,mini.height); mctx.stroke(); }
+  for(const ry of ROADS_H){ mctx.beginPath(); mctx.moveTo(0,ry*sy); mctx.lineTo(mini.width,ry*sy); mctx.stroke(); }
+  mctx.fillStyle='#6b5a4a';
+  for(const b of buildings) mctx.fillRect(b.x*sx,b.y*sy,Math.max(2,b.w*sx),Math.max(2,b.h*sy));
+  if(missionActive){
+    const m=MISSIONS[missionIndex];
+    const t=missionPhase==='toPickup'?m.from:m.to;
+    mctx.fillStyle=missionPhase==='toPickup'?'#ffe14d':'#7dff9b';
+    mctx.beginPath(); mctx.arc(t.x*sx,t.y*sy,5,0,Math.PI*2); mctx.fill();
+  }
+  mctx.fillStyle='#9aa0b0';
+  for(const tr of traffic){ mctx.fillRect(tr.x*sx-1,tr.y*sy-1,2,2); }
+  mctx.fillStyle='#ff4d4d';
+  for(const pol of police){ mctx.beginPath(); mctx.arc(pol.x*sx,pol.y*sy,3,0,Math.PI*2); mctx.fill(); }
+  // pemain
+  mctx.fillStyle='#fff';
+  mctx.beginPath(); mctx.arc(player.x*sx,player.y*sy,4,0,Math.PI*2); mctx.fill();
+  mctx.strokeStyle='#fff'; mctx.lineWidth=1.5;
+  mctx.beginPath(); mctx.moveTo(player.x*sx,player.y*sy);
+  mctx.lineTo(player.x*sx+Math.cos(player.angle)*9, player.y*sy+Math.sin(player.angle)*9); mctx.stroke();
+}
+
+// ---- Loop utama ----
+let lastT=performance.now();
+function loop(t){
+  requestAnimationFrame(loop);
+  const dt=Math.min(0.05,(t-lastT)/1000); lastT=t;
+  if(started && !paused) update(dt);
+  draw();
+}
+requestAnimationFrame(loop);
+updateHUD();
+
+// ---- Tombol UI ----
+$('btnStart').addEventListener('click', ()=>{
+  ensureAudio(); started=true; paused=false;
+  $('startScreen').classList.add('hidden');
+  if(!missionActive) startMission(missionIndex);
+  toast('🛵 Selamat narik, Arka! Ikuti titik kuning di minimap.');
+});
+$('btnContinue').addEventListener('click', ()=>{
+  ensureAudio();
+  if(loadGame()){ started=true; $('startScreen').classList.add('hidden'); startMission(missionIndex); toast('Save dimuat. Lanjut narik!'); }
+});
+$('btnPause').addEventListener('click', togglePause);
+$('btnResume').addEventListener('click', togglePause);
+$('btnSave').addEventListener('click', ()=>{ saveGame(); toast('💾 Disimpan!'); });
+$('btnSound').addEventListener('click', toggleMute);
+$('btnFree').addEventListener('click', ()=>{
+  $('endScreen').classList.add('hidden');
+  freeMode=true; startRandomMission();
+});
+$('btnAgain').addEventListener('click', ()=>{
+  try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+  location.reload();
+});
+if(hasSave()) $('btnContinue').classList.remove('hidden');
+// Mode scene untuk screenshot (lihat shots.json): ?shot=cover|chase|market|warteg
+if(SHOT){ applyShot(SHOT); }
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# make.fun secrets — JANGAN PERNAH COMMIT file-file ini
+makefun-keypair.json
+.makefun/credentials
+credentials
+.env
+.env.*
+*.pem
+*.key
+*.tar.gz
+gta6-*-kit/
+
+# build / local
+node_modules/
+out/
+*.log
+.DS_Store
